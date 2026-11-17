@@ -424,30 +424,121 @@
         "journal"
       ],
       "verification": "python3 scripts/workflow_check.py --workflow events"
+    },
+    {
+      "id": "segmented-delivery",
+      "name": "segmented-delivery",
+      "entry": "POST /forge/v1/renders + GET /forge/v1/renders/{id}/delivery",
+      "success": "统一分片清单、可播前缀与冻结提交",
+      "failure": "配方梯子非法或边界与清单不符时拒绝",
+      "steps": [
+        "入口解码与领域事实读取",
+        "冻结时一次确定跨清晰度的规范时间边界",
+        "逐片检验并耐久登记后才出现在清单"
+      ],
+      "module_ids": [
+        "http",
+        "application",
+        "domain",
+        "encoding",
+        "inspection",
+        "objects",
+        "journal"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow segmented-delivery"
+    },
+    {
+      "id": "progressive-review",
+      "name": "progressive-review",
+      "entry": "GET /forge/v1/renders/{id}/delivery + /segments/{rendition}/{index}",
+      "success": "编码未结束时前部已可下载",
+      "failure": "未确认分片与不完整包拒绝",
+      "steps": [
+        "入口解码与领域事实读取",
+        "审片只读取已确认的连续前部",
+        "暂时不可用的清晰度不标记为可切换"
+      ],
+      "module_ids": [
+        "http",
+        "application",
+        "domain",
+        "encoding",
+        "inspection"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow progressive-review"
+    },
+    {
+      "id": "package-delivery",
+      "name": "package-delivery",
+      "entry": "GET /forge/v1/renders/{id}/package",
+      "success": "各清晰度时间边界一致且无缺片的ZIP",
+      "failure": "清单不完整或摘要不符时拒绝",
+      "steps": [
+        "入口解码与领域事实读取",
+        "包内媒体、字幕与清单来自同一冻结提交",
+        "逐片摘要与边界在打包前复核"
+      ],
+      "module_ids": [
+        "http",
+        "application",
+        "inspection",
+        "objects",
+        "journal",
+        "domain"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow package-delivery"
+    },
+    {
+      "id": "segmented-resume",
+      "name": "segmented-resume",
+      "entry": "强制终止后重启及 POST retry",
+      "success": "保留已确认前缀并只续编缺失边界",
+      "failure": "中断不误报成功；已确认分片不重复登记",
+      "steps": [
+        "入口解码与领域事实读取",
+        "已确认分片持久保留且不重复编码",
+        "续编后续交仍绑定原冻结提交"
+      ],
+      "module_ids": [
+        "configuration",
+        "application",
+        "journal",
+        "encoding",
+        "inspection",
+        "objects",
+        "domain"
+      ],
+      "verification": "python3 scripts/workflow_check.py --workflow segmented-resume"
     }
   ],
   "complexity": {
     "mechanisms": [
-      "state_machine",
-      "resource_lifecycle",
-      "error_propagation",
-      "concurrency",
-      "versioning_audit",
-      "recovery_rollback",
-      "export_freeze",
-      "time_semantics",
       "capacity",
+      "concurrency",
+      "error_propagation",
+      "export_freeze",
       "idempotency",
-      "policy_rules",
       "lineage",
-      "snapshot_consistency"
+      "multi_quality_ladder",
+      "policy_rules",
+      "progressive_delivery",
+      "recovery_rollback",
+      "resource_lifecycle",
+      "resumability",
+      "snapshot_consistency",
+      "state_machine",
+      "time_semantics",
+      "versioning_audit"
     ],
     "evidence": {
       "concurrency": "internal/service/worker.go:claim, completeLocked",
       "recovery_rollback": "internal/journal/recovery.go:Recover",
       "time_semantics": "internal/timeline/plan.go:Build; internal/caption/map.go:Map",
       "idempotency": "internal/service/submit.go:Submit",
-      "snapshot_consistency": "internal/service/submit.go:Submit; internal/journal/store.go:Update"
+      "snapshot_consistency": "internal/service/submit.go:Submit; internal/journal/store.go:Update",
+      "progressive_delivery": "internal/service/delivery.go:executeSegmented; internal/domain/delivery.go:Confirm",
+      "resumability": "internal/encoding/segment.go:EncodeSegments; internal/service/delivery.go:encodeRange",
+      "multi_quality_ladder": "internal/domain/delivery.go:SegmentBoundaries,OrderedRenditions"
     }
   }
 }

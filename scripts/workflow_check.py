@@ -88,6 +88,21 @@ def main():
                     return r
                 time.sleep(.02)
             raise RuntimeError('render state timeout')
+        def wait_delivery(rid, predicate, timeout=60):
+            deadline = time.monotonic()+timeout
+            while time.monotonic() < deadline:
+                d = request('GET', '/renders/'+rid+'/delivery')
+                if predicate(d):
+                    return d
+                time.sleep(.02)
+            raise RuntimeError('delivery state timeout')
+        def ladder_recipe(segment_ms=None):
+            body = dict(recipe_body, name='review-ladder')
+            body.pop('width', None); body.pop('height', None)
+            body.update(width=320, height=180, segment_ms=segment_ms or 1500, renditions=[
+                dict(name='proxy', width=160, height=90, video_bitrate_kbps=300, audio_bitrate_kbps=64),
+                dict(name='final', width=320, height=180, video_bitrate_kbps=900, audio_bitrate_kbps=128)])
+            return request('POST', '/recipes', body, status=201)
         try:
             start()
             media = (scratch/'calibration.mp4').read_bytes()
@@ -164,6 +179,64 @@ def main():
                 observe('wav-render', 'trimmed stereo PCM WAV encoded with loudness filter')
             request('DELETE', '/sources/'+sid, status=409)
             observe('retire-source', 'historical sheet reference prevents retirement')
+            segmented = None
+            if args.workflow in ('all', 'segmented-delivery', 'progressive-review', 'package-delivery'):
+                ladder = ladder_recipe()
+                segmented = request('POST', '/renders', dict(req, recipe_id=ladder['id']),
+                                    {'Idempotency-Key': 'segmented'}, status=202)
+                segmented_id = segmented['id']
+                need(segmented['delivery'] and segmented['delivery']['frozen_submission'], 'submission not frozen')
+                first = wait_delivery(segmented_id, lambda d: any(r['prefix_count'] > 0 for r in d['renditions']))
+                need(first['complete'] is False, 'delivery claimed complete before all segments confirmed')
+                playable = [r for r in first['renditions'] if r['playable']]
+                need(playable, 'no rendition became playable while encoding continued')
+                pending_names = [r['name'] for r in first['renditions'] if not r['playable']]
+                need(all(r['name'] not in pending_names for r in playable), 'pending rendition offered as switchable')
+                head = next(r for r in first['renditions'] if r['playable'])
+                download = request('GET', f'/renders/{segmented_id}/segments/{head["name"]}/0', raw=True)
+                need(len(download) == head['segments'][0]['bytes'], 'segment download size mismatch')
+                need(hashlib.sha256(download).hexdigest() == head['segments'][0]['digest'], 'segment download digest mismatch')
+                request('GET', f'/renders/{segmented_id}/package', status=409)
+                review_state = request('GET', '/renders/'+segmented_id)['state']
+                need(review_state == 'running', f'incomplete delivery exposed as {review_state}')
+                observe('segmented-delivery', 'canonical boundary list fixed before encoding; front segments confirmed progressively')
+                observe('progressive-review', 'playable rendition prefix downloadable while slower branch still encoding; package refused')
+                finished = wait_delivery(segmented_id, lambda d: d['state'] in ('succeeded', 'failed'), timeout=90)
+                need(finished['state'] == 'succeeded' and finished['complete'], str(request('GET', '/renders/'+segmented_id)['attempts']))
+                need(finished['duration_ms'] == plan['duration_ms'], 'delivery duration drifted from plan')
+                expected = finished['boundaries']
+                for rendition in finished['renditions']:
+                    need([s['index'] for s in rendition['segments']] == [b['index'] for b in expected], 'segments not contiguous')
+                    for segment in rendition['segments']:
+                        boundary = expected[segment['index']]
+                        need(segment['start_ms'] == boundary['start_ms'] and segment['end_ms'] == boundary['end_ms'], 'segment boundary drifted')
+                        need(segment['submission'] == finished['frozen_submission'], 'segment cites a foreign submission')
+                observe('package-delivery', 'every rendition has time-aligned contiguous segments bound to one submission')
+                if args.workflow in ('all', 'package-delivery'):
+                    package = request('GET', f'/renders/{segmented_id}/package', raw=True)
+                    with zipfile.ZipFile(io.BytesIO(package)) as z:
+                        names = set(z.namelist())
+                        need('delivery.manifest.json' in names and 'captions.vtt' in names, 'package manifest or captions missing')
+                        frozen = json.loads(z.read('delivery.manifest.json'))
+                        need(frozen['delivery']['complete'], 'package manifest not complete')
+                        for rendition in frozen['delivery']['renditions']:
+                            for segment in rendition['segments']:
+                                need(segment['filename'] in names, 'package missing a confirmed segment')
+                                need(hashlib.sha256(z.read(segment['filename'])).hexdigest() == segment['digest'],
+                                     'package segment digest mismatch')
+                        need(z.read('captions.vtt').decode() == frozen['plan']['vtt'], 'package captions drifted')
+                    observe('package-delivery', 'archive carries every confirmed segment, captions and one frozen submission')
+                # edit the sheet after freeze: the confirmed delivery must remain
+                # verifiable against the original submission, not the new revision.
+                request('PUT', '/sheets/'+sh, dict(sheet_body, name='post-freeze-edit'), {'If-Match': '2'}, status=201)
+                after_edit = request('GET', f'/renders/{segmented_id}/delivery')
+                need(after_edit['frozen_submission'] == finished['frozen_submission'], 'frozen submission changed after edit')
+                need(all(s['submission'] == after_edit['frozen_submission']
+                         for r in after_edit['renditions'] for s in r['segments']), 'segment provenance drifted after edit')
+                verified = request('POST', f'/renders/{segmented_id}/verify')
+                need(verified['digest'] == after_edit['frozen_submission'], 'verify did not bind the frozen submission')
+                request('GET', f'/renders/{segmented_id}/segments/'+head['name']+'/999', status=409)
+                observe('segmented-delivery', 'post-freeze sheet edit left every segment and caption bound to the original submission')
             if args.workflow in ('all', 'cancel', 'retry', 'restart-recover'):
                 long_sheet = request('POST', '/sheets', dict(sheet_body, name='extended-calibration', spans=sheet_body['spans']*16), status=201)
                 pending = request('POST', '/renders', dict(req, sheet_id=long_sheet['id']), {'Idempotency-Key': 'interrupt'}, status=202)
@@ -183,6 +256,34 @@ def main():
                 retried = wait_render(interrupted_id)
                 need(retried['state'] == 'succeeded' and len(retried['attempts']) == 2, str(retried['attempts']))
                 observe('retry', 'second attempt completed using original snapshot')
+            if args.workflow in ('all', 'segmented-resume'):
+                ladder = ladder_recipe()
+                resume_sheet = request('POST', '/sheets', dict(sheet_body, name='segmented-interrupt',
+                                                                spans=sheet_body['spans']*4), status=201)
+                pending = request('POST', '/renders', dict(req, sheet_id=resume_sheet['id'], recipe_id=ladder['id']),
+                                  {'Idempotency-Key': 'segmented-interrupt'}, status=202)
+                resume_id = pending['id']
+                partial = wait_delivery(resume_id, lambda d: any(r['prefix_count'] > 0 for r in d['renditions']))
+                before = {r['name']: len(r['segments']) for r in partial['renditions']}
+                need(any(count > 0 for count in before.values()), 'no segment was confirmed before interruption')
+                need(not partial['complete'], 'interrupted delivery was already complete')
+                stop(force=True)
+                start()
+                recovered = request('GET', f'/renders/{resume_id}/delivery')
+                need(recovered['state'] == 'failed', 'interrupted delivery was not marked failed')
+                kept = {r['name']: len(r['segments']) for r in recovered['renditions']}
+                need(kept == before, f'confirmed prefix was lost across restart: {before} -> {kept}')
+                request('POST', f'/renders/{resume_id}/retry', status=202)
+                resumed = wait_delivery(resume_id, lambda d: d['state'] in ('succeeded', 'failed'), timeout=120)
+                need(resumed['state'] == 'succeeded' and resumed['complete'], str(request('GET', f'/renders/{resume_id}')['attempts']))
+                events_for = [e for e in request('GET', '/events?after=0') if e['subject'] == resume_id]
+                confirmed_events = [e['detail'] for e in events_for if e['kind'] == 'render.segment.confirmed']
+                need(len(confirmed_events) == len(set(confirmed_events)),
+                     'a confirmed boundary was re-encoded and republished during resume')
+                observe('segmented-resume', 'restart retained the confirmed prefix; retry re-encoded only missing boundaries')
+                verified = request('POST', f'/renders/{resume_id}/verify')
+                need(verified['digest'] == resumed['frozen_submission'], 'resumed delivery did not re-verify')
+                observe('segmented-resume', 'resumed delivery re-verified against the same frozen submission')
             events = request('GET', '/events?after=0')
             need(events and all(a['sequence'] < b['sequence'] for a, b in zip(events, events[1:])), 'event order mismatch')
             tail = request('GET', '/events?after='+str(events[-1]['sequence']))

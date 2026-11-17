@@ -39,6 +39,9 @@ func Open(root string) (*Store, error) {
 		err = nil
 	}
 	if err == nil {
+		err = migrate(&s.state)
+	}
+	if err == nil {
 		err = domain.ValidateState(s.state)
 	}
 	if err != nil {

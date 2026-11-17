@@ -28,6 +28,9 @@ func Handler(s *service.Service) http.Handler {
 	m.HandleFunc("POST /forge/v1/renders/{id}/verify", a.verify)
 	m.HandleFunc("GET /forge/v1/renders/{id}/artifact", a.artifact)
 	m.HandleFunc("GET /forge/v1/renders/{id}/bundle", a.bundle)
+	m.HandleFunc("GET /forge/v1/renders/{id}/delivery", a.delivery)
+	m.HandleFunc("GET /forge/v1/renders/{id}/segments/{rendition}/{index}", a.segment)
+	m.HandleFunc("GET /forge/v1/renders/{id}/package", a.packageDelivery)
 	m.HandleFunc("GET /forge/v1/events", a.events)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")

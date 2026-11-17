@@ -21,6 +21,9 @@ func (s *Service) Artifact(id string) (domain.Render, string, error) {
 	if !ok {
 		return r, "", domain.Missing("render", id)
 	}
+	if r.Delivery != nil {
+		return r, "", domain.Conflict("segmented render is delivered through /delivery and /package")
+	}
 	if r.State != "succeeded" || r.Artifact == nil {
 		return r, "", domain.Conflict("render has no committed artifact")
 	}
@@ -28,6 +31,13 @@ func (s *Service) Artifact(id string) (domain.Render, string, error) {
 	return r, dir, err
 }
 func (s *Service) Verify(ctx context.Context, id string) (domain.Inspection, error) {
+	st, err := s.Store.Snapshot()
+	if err != nil {
+		return domain.Inspection{}, err
+	}
+	if r, ok := st.Renders[id]; ok && r.Delivery != nil {
+		return s.verifySegmented(id)
+	}
 	r, dir, err := s.Artifact(id)
 	if err != nil {
 		return domain.Inspection{}, err

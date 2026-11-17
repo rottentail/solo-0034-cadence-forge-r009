@@ -101,6 +101,26 @@
       "workflow_id": "events",
       "command": "python3 scripts/workflow_check.py --workflow events",
       "timeout_seconds": 120
+    },
+    {
+      "workflow_id": "segmented-delivery",
+      "command": "python3 scripts/workflow_check.py --workflow segmented-delivery",
+      "timeout_seconds": 240
+    },
+    {
+      "workflow_id": "progressive-review",
+      "command": "python3 scripts/workflow_check.py --workflow progressive-review",
+      "timeout_seconds": 240
+    },
+    {
+      "workflow_id": "package-delivery",
+      "command": "python3 scripts/workflow_check.py --workflow package-delivery",
+      "timeout_seconds": 240
+    },
+    {
+      "workflow_id": "segmented-resume",
+      "command": "python3 scripts/workflow_check.py --workflow segmented-resume",
+      "timeout_seconds": 240
     }
   ]
 }

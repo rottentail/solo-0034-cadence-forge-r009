@@ -21,18 +21,20 @@ type Artifact struct {
 	Inspection  Inspection `json:"inspection"`
 }
 type Render struct {
-	ID          string            `json:"id"`
-	Key         string            `json:"key"`
-	RequestHash string            `json:"request_hash"`
-	Sheet       Sheet             `json:"sheet"`
-	Recipe      Recipe            `json:"recipe"`
-	Sources     map[string]Source `json:"sources"`
-	Plan        Plan              `json:"plan"`
-	State       string            `json:"state"`
-	Attempts    []Attempt         `json:"attempts"`
-	Artifact    *Artifact         `json:"artifact,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID               string            `json:"id"`
+	Key              string            `json:"key"`
+	RequestHash      string            `json:"request_hash"`
+	Sheet            Sheet             `json:"sheet"`
+	Recipe           Recipe            `json:"recipe"`
+	Sources          map[string]Source `json:"sources"`
+	Plan             Plan              `json:"plan"`
+	FrozenSubmission string            `json:"frozen_submission"`
+	State            string            `json:"state"`
+	Attempts         []Attempt         `json:"attempts"`
+	Artifact         *Artifact         `json:"artifact,omitempty"`
+	Delivery         *DeliveryManifest `json:"delivery,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
 }
 type Event struct {
 	Sequence uint64    `json:"sequence"`

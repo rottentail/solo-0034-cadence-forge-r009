@@ -117,6 +117,10 @@ func (s *Service) execute(ctx context.Context, r domain.Render) {
 			return
 		}
 	}
+	if domain.DeliveryEnabled(r.Recipe) {
+		s.executeSegmented(ctx, r, attempt, stage)
+		return
+	}
 	runner := encoding.Runner{Binary: s.Config.FFmpeg, Blobs: s.Blobs}
 	name, err := runner.Encode(ctx, r, stage)
 	if err != nil {
@@ -145,6 +149,7 @@ func (s *Service) execute(ctx context.Context, r domain.Render) {
 		return
 	}
 	s.completeLocked(r, artifact, nil)
+	return
 }
 func (s *Service) complete(r domain.Render, a *domain.Artifact, cause error) {
 	s.mutation.Lock()

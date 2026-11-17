@@ -69,7 +69,15 @@ func (s *Service) Submit(key string, request Request) (domain.Render, error) {
 		plan.VTT = caption.VTT(caption.Map(sheet, plan))
 		now := time.Now().UTC()
 		id := ID()
-		out = domain.Render{ID: id, Key: key, RequestHash: fingerprint, Sheet: sheet, Recipe: recipe, Sources: sources, Plan: plan, State: "queued", Attempts: []domain.Attempt{}, CreatedAt: now, UpdatedAt: now}
+		frozen := domain.SubmissionDigest(sheet, recipe, sources, plan)
+		out = domain.Render{ID: id, Key: key, RequestHash: fingerprint, Sheet: sheet, Recipe: recipe, Sources: sources, Plan: plan, FrozenSubmission: frozen, State: "queued", Attempts: []domain.Attempt{}, CreatedAt: now, UpdatedAt: now}
+		if domain.DeliveryEnabled(recipe) {
+			manifest, err := domain.NewDeliveryManifest(out)
+			if err != nil {
+				return domain.Invalid("delivery ladder is unusable: %s", err)
+			}
+			out.Delivery = manifest
+		}
 		st.Renders[id] = out
 		st.Emit(id, "render.queued", "frozen source and recipe revisions")
 		return nil

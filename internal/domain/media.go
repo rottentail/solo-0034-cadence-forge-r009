@@ -42,16 +42,18 @@ type Sheet struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 type Recipe struct {
-	ID         string  `json:"id"`
-	Revision   int     `json:"revision"`
-	Name       string  `json:"name"`
-	Format     string  `json:"format"`
-	Width      int     `json:"width"`
-	Height     int     `json:"height"`
-	FPS        int     `json:"fps"`
-	SampleRate int     `json:"sample_rate"`
-	Normalize  bool    `json:"normalize"`
-	TargetLUFS float64 `json:"target_lufs"`
+	ID         string      `json:"id"`
+	Revision   int         `json:"revision"`
+	Name       string      `json:"name"`
+	Format     string      `json:"format"`
+	Width      int         `json:"width"`
+	Height     int         `json:"height"`
+	FPS        int         `json:"fps"`
+	SampleRate int         `json:"sample_rate"`
+	Normalize  bool        `json:"normalize"`
+	TargetLUFS float64     `json:"target_lufs"`
+	SegmentMS  int64       `json:"segment_ms,omitempty"`
+	Renditions []Rendition `json:"renditions,omitempty"`
 }
 type Placement struct {
 	SourceID    string  `json:"source_id"`

@@ -28,6 +28,12 @@ func ValidateRecipe(r Recipe) error {
 	if r.Normalize && (math.IsNaN(r.TargetLUFS) || math.IsInf(r.TargetLUFS, 0) || r.TargetLUFS < -36 || r.TargetLUFS > -9) {
 		return Invalid("normalization target must be -36..-9 LUFS")
 	}
+	if r.SegmentMS == 0 && len(r.Renditions) > 0 {
+		return Invalid("segment_ms is required with a rendition ladder")
+	}
+	if err := ValidateRenditions(r); err != nil {
+		return err
+	}
 	return nil
 }
 func ValidateSheet(s Sheet, sources map[string]Source) error {
@@ -120,8 +126,11 @@ func ValidateState(s State) error {
 		default:
 			return fmt.Errorf("invalid render state")
 		}
-		if (r.State == "succeeded") != (r.Artifact != nil) {
-			return fmt.Errorf("artifact state mismatch")
+		if err := ValidateDelivery(r); err != nil {
+			return err
+		}
+		if r.FrozenSubmission == "" {
+			return fmt.Errorf("render lacks a frozen submission identity")
 		}
 		if r.Sources == nil {
 			return fmt.Errorf("missing render source snapshot")
@@ -131,6 +140,19 @@ func ValidateState(s State) error {
 		}
 		if err := ValidateRecipe(r.Recipe); err != nil {
 			return err
+		}
+		if r.Delivery != nil {
+			// A segmented render is deliverable only through a complete
+			// confirmed manifest. It never carries a single-file artifact, so
+			// success can never be claimed by a stray file on disk.
+			if r.Artifact != nil {
+				return fmt.Errorf("segmented render must not expose a single-file artifact")
+			}
+			if r.State == "succeeded" && !r.Delivery.Complete {
+				return fmt.Errorf("succeeded segmented render has an incomplete manifest")
+			}
+		} else if (r.State == "succeeded") != (r.Artifact != nil) {
+			return fmt.Errorf("artifact state mismatch")
 		}
 	}
 	var previous uint64
